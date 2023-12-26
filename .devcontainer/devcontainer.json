@@ -4,6 +4,7 @@
 		"context": "..",
 		"dockerfile": "dev.Dockerfile"
 	},
+	"postStartCommand": "git lfs update && git lfs pull",
 	"customizations": {
 		"vscode": {
 			"extensions": [
