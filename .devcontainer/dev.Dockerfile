@@ -5,12 +5,8 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update &&\
     apt-get install -y \
-        nano git git-lfs \
-        build-essential \
-        python3-dev \
-        python3-pip \
-        ffmpeg \
-        graphviz
+        git git-lfs \
+        build-essential
 
 RUN pip3 install \
     numpy \
