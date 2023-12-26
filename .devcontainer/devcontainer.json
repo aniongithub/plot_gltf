@@ -1,0 +1,18 @@
+{
+	"name": "development",
+	"build": {
+		"context": "..",
+		"dockerfile": "dev.Dockerfile"
+	},
+	"updateContentCommand": ".devcontainer/updateContent.sh",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"cweijan.vscode-typora",
+				"ms-python.python",
+				"analytic-signal.preview-mp4",
+				"GitHub.copilot"
+			]
+		}
+	}
+}
