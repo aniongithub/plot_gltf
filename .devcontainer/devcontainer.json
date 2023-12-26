@@ -8,10 +8,7 @@
 	"customizations": {
 		"vscode": {
 			"extensions": [
-				"cweijan.vscode-typora",
-				"ms-python.python",
-				"analytic-signal.preview-mp4",
-				"GitHub.copilot"
+				"ms-python.python"
 			]
 		}
 	}
