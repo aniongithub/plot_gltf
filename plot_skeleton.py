@@ -14,6 +14,7 @@ fig = plt.figure(dpi=300)
 ax = fig.add_subplot(projection='3d')
 
 # Plot the bind pose skeleton using BFS and our visitor
+# Ignore the elongated feet, it's a result of automatic axis-scaling in matplotlib
 skeleton_visitor_BFS(tpose_gltf, Visitors.plot_bindpose, 
                      axes = ax)
 plt.savefig("bindpose.png") # save
