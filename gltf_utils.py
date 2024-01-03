@@ -8,6 +8,8 @@ import pytransform3d.transformations as pt
 from matplotlib.axes import Axes
 from pygltflib import Accessor, Node, GLTF2
 
+import base64
+
 # Workaround for issue with pytransform3d's use of np.int, np.float, etc.
 # See: https://stackoverflow.com/a/75837322/802203
 np.float = float  # noqa: F401
@@ -124,7 +126,11 @@ def get_accessor_data(gltf: GLTF2, accessor: Accessor) -> List[Tuple[Union[np.in
     buffer = gltf.buffers[bufferView.buffer]
 
     # Get the data from the buffer via the URI
-    buffer_data = gltf.get_data_from_buffer_uri(buffer.uri)
+    if buffer.uri is not None and buffer.uri.startswith("data:"):
+        buffer_data = base64.b64decode(buffer.uri.split(",")[1])
+    else:
+        buffer_data = gltf.get_data_from_buffer_uri(buffer.uri)
+    
     result = []
 
     # Calculate the element stride in bytes
@@ -360,9 +366,14 @@ def skeleton_visitor_BFS(gltf: GLTF2, visitor: Callable[Concatenate[GLTF2, int, 
     None
     """
 
-    # Initialize a queue with the root node
-    queue = deque([(gltf.skins[0].skeleton if root_node is None else root_node, -1)])
+    # Find the root node if it wasn't specified
+    root_node = gltf.skins[0].skeleton if root_node is None else root_node
+    root_node = gltf.skins[0].joints[0] if root_node is None else root_node
 
+    # Initialize a queue with the root node
+    queue = deque([(root_node, -1)])
+
+    # While we have nodes to visit
     while queue:
         # Dequeue a node and its parent
         curr_node_idx, parent_node_idx = queue.popleft()
@@ -383,7 +394,7 @@ class Visitors:
     def plot_bindpose(gltf: GLTF2, curr_node_idx: int, parent_node_idx: int, axes: Axes, 
                       joint_color: Union[str, Tuple[float, float, float]] = 'blue', 
                       bone_color: Union[str, Tuple[float, float, float]] = 'red', 
-                      _joint_transforms: Dict[str, np.ndarray] = {}):
+                      _joint_transforms: Dict[int, np.ndarray] = {}):
         """
         Plots the bind pose of a GLTF model. 
         Note that any arguments starting with an _ are considered private and should not be
@@ -396,46 +407,49 @@ class Visitors:
         - ax (Axes): The matplotlib Axes object to plot on.
         - joint_color (Union[str, Tuple[float, float, float]], optional): The color of the joint markers. Defaults to 'blue'.
         - bone_color (Union[str, Tuple[float, float, float]], optional): The color of the bone lines. Defaults to 'red'.
-        - _joint_transforms (Dict[str, np.ndarray], optional): Dictionary to store joint transforms. Defaults to {}.
+        - _joint_transforms (Dict[int, np.ndarray], optional): Visitor-local dictionary to store joint transforms across calls.
         """
         
         # Get the current node and parent node information
         curr_node = gltf.nodes[curr_node_idx]
-        parent_node_name = gltf.nodes[parent_node_idx].name if parent_node_idx != -1 else None
+        parent_node_idx = parent_node_idx if parent_node_idx != -1 else None
 
         # Get the parent transform if it exists, otherwise use identity
-        parent_transform = _joint_transforms[parent_node_name] if parent_node_name in _joint_transforms else np.identity(4)
+        parent_transform = _joint_transforms[parent_node_idx] if parent_node_idx in _joint_transforms else np.identity(4)
         # Find the parent's global position
         parent_global_pos = pt.transform(parent_transform, np.array([0, 0, 0, 1]))
 
         # Calculate the current joint's local transform
+        translation = curr_node.translation if curr_node.translation is not None else [0, 0, 0]
+        rotation = curr_node.rotation if curr_node.rotation is not None else [0, 0, 0, 1]
+        scale = curr_node.scale if curr_node.scale is not None else [1, 1, 1] # Ignore scale for now
         curr_joint_local_transform = pt.transform_from_pq(
-            np.array([curr_node.translation[0], 
-                      curr_node.translation[1], 
-                      curr_node.translation[2],
-                      curr_node.rotation[3],
-                      curr_node.rotation[0], 
-                      curr_node.rotation[1], 
-                      curr_node.rotation[2]]))
+            np.array([translation[0], 
+                      translation[1], 
+                      translation[2],
+                      rotation[3],
+                      rotation[0], 
+                      rotation[1], 
+                      rotation[2]]))
         # Calculate the current joint's global transform by composing the local transform and parent transform
         curr_joint_global_transform = pt.concat(curr_joint_local_transform, parent_transform)
         
         # Store the current joint's global transform for later use
-        _joint_transforms[curr_node.name] = curr_joint_global_transform
+        _joint_transforms[curr_node_idx] = curr_joint_global_transform
 
         # Calculate the current joint's global position and plot the joint marker
         curr_joint_global_pos = pt.transform(curr_joint_global_transform, np.array([0, 0, 0, 1]))
         axes.scatter(curr_joint_global_pos[0], curr_joint_global_pos[1], curr_joint_global_pos[2], c = joint_color, marker='o')
 
         # If the parent node exists, plot the bone line connecting the parent and current joint
-        if parent_node_name is not None:
+        if parent_node_idx is not None:
             axes.plot([parent_global_pos[0], curr_joint_global_pos[0]],
                     [parent_global_pos[1], curr_joint_global_pos[1]],
                     [parent_global_pos[2], curr_joint_global_pos[2]], c = bone_color)
             
     def plot_pose_at(gltf: GLTF2, curr_node_idx: int, parent_node_idx: int,
                         time: float, animation: Dict[int, AnimationChannelData], axes: Axes, 
-                        _joint_transforms: Dict[str, np.ndarray] = {}):
+                        _joint_transforms: Dict[int, np.ndarray] = {}):
         """
         Visitor that plots the pose of a skeleton in a GLTF model at a specific time.
 
@@ -446,7 +460,7 @@ class Visitors:
             time (float): The time at which to plot the pose.
             animation (Dict[int, AnimationChannelData]): The animation data for the model.
             ax (Axes): The matplotlib Axes object to plot on.
-            _joint_transforms (Dict[str, np.ndarray], optional): Dictionary to store joint transforms. Defaults to {}.
+            _joint_transforms (Dict[int, np.ndarray], optional): Visitor-local dictionary to store joint transforms across calls.
 
         Returns:
             None
@@ -454,23 +468,26 @@ class Visitors:
 
         # Get the current joint and parent node information
         curr_joint = gltf.nodes[curr_node_idx]
-        parent_node_name = gltf.nodes[parent_node_idx].name if parent_node_idx != -1 else None
+        parent_node_idx = parent_node_idx if parent_node_idx != -1 else None
 
         # Get the parent transform
-        parent_transform = _joint_transforms[parent_node_name] if parent_node_name in _joint_transforms else np.identity(4)
+        parent_transform = _joint_transforms[parent_node_idx] if parent_node_idx in _joint_transforms else np.identity(4)
 
         # Calculate the parent global position
         parent_global_pos = pt.transform(parent_transform, np.array([0, 0, 0, 1]))
 
         # Calculate the local bindpose transform of the current joint
+        translation = curr_joint.translation if curr_joint.translation is not None else [0, 0, 0]
+        rotation = curr_joint.rotation if curr_joint.rotation is not None else [0, 0, 0, 1]
+        scale = curr_joint.scale if curr_joint.scale is not None else [1, 1, 1] # Ignore scale for now
         joint_local_transform = pt.transform_from_pq(
-            np.array([curr_joint.translation[0], 
-                      curr_joint.translation[1], 
-                      curr_joint.translation[2],
-                      curr_joint.rotation[3],
-                      curr_joint.rotation[0], 
-                      curr_joint.rotation[1], 
-                      curr_joint.rotation[2]]))
+            np.array([translation[0], 
+                      translation[1], 
+                      translation[2],
+                      rotation[3],
+                      rotation[0], 
+                      rotation[1], 
+                      rotation[2]]))
 
         # Get the animation transform for the current joint. If there is no animation channel for this node, 
         # use identity as the animation transform
@@ -478,10 +495,10 @@ class Visitors:
 
         # Calculate the global transform of the current joint by composing the local bindpose transform, animation transform 
         # and parent transform together
-        curr_joint_global_transform = pt.concat(pt.concat(joint_local_transform, joint_anim_local_transform), parent_transform)
+        curr_joint_global_transform = pt.concat(parent_transform, pt.concat(joint_local_transform, joint_anim_local_transform))
         
         # Store the current joint's global transform for later use
-        _joint_transforms[curr_joint.name] = curr_joint_global_transform
+        _joint_transforms[curr_node_idx] = curr_joint_global_transform
 
         # Calculate the global position of the current joint
         curr_joint_global_pos = pt.transform(curr_joint_global_transform, np.array([0, 0, 0, 1]))
@@ -490,7 +507,7 @@ class Visitors:
         axes.scatter(curr_joint_global_pos[0], curr_joint_global_pos[1], curr_joint_global_pos[2], c='blue', marker='o')
 
         # If there is a parent joint, plot a line connecting the parent and current joint
-        if parent_node_name is not None:
+        if parent_node_idx is not None:
             axes.plot([parent_global_pos[0], curr_joint_global_pos[0]],
                     [parent_global_pos[1], curr_joint_global_pos[1]],
                     [parent_global_pos[2], curr_joint_global_pos[2]], c='r')
@@ -537,6 +554,13 @@ class Visitors:
         # Use inverse bind matrix if it exists, otherwise use identity
         # See: https://stackoverflow.com/a/41327588/802203
         joint_inv_bind_matrix = _inv_bind_matrices[curr_node_idx] if curr_node_idx in _inv_bind_matrices else np.identity(4)
+
+        joint_transform = pt.transform(pt.concat(parent_transform, 
+                                                 pt.concat(joint_inv_bind_matrix, joint_anim_local_transform, strict_check = False),
+                                                 strict_check = False), 
+                                       np.array([0, 0, 0, 1]), strict_check = False)
+        _joint_transforms[curr_node_idx] = joint_transform
+        axes.scatter(joint_transform[0], joint_transform[1], joint_transform[2], c='blue', marker='o')
 
         # Calculate the local transform of the current joint
         joint_local_transform = pt.concat(joint_anim_local_transform, joint_inv_bind_matrix, strict_check = False)

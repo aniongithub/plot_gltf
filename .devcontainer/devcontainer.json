@@ -4,6 +4,7 @@
 		"context": "..",
 		"dockerfile": "dev.Dockerfile"
 	},
+	"updateContentCommand": "pip3 install -r requirements.txt",
 	"customizations": {
 		"vscode": {
 			"extensions": [
